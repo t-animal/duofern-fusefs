@@ -53,6 +53,18 @@ class DuofernFs(fuse.Fuse):
             return -errno.ENOENT
 
         if len(pathElements) == 2:
+            writeableProperties = [
+                "sunMode",
+                "position",
+                "sunPosition",
+                "ventilatingPosition",
+                "dawnAutomatic",
+                "duskAutomatic",
+                "manualMode",
+                "sunAutomatic",
+                "timeAutomatic",
+                "ventilatingMode"
+            ]
             [stickCode, stickProperty] = pathElements
 
             if stickCode not in self._sticks:
@@ -60,6 +72,8 @@ class DuofernFs(fuse.Fuse):
 
             if stickProperty in self._sticks[stickCode]:
                 st.st_mode = stat.S_IFREG | 0o444
+                if stickProperty in writeableProperties:
+                    st.st_mode = st.st_mode | 0o222
                 st.st_nlink = 2
                 return st
 
