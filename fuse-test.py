@@ -76,6 +76,7 @@ class DuofernFs(fuse.Fuse):
             st.st_mode = stat.S_IFREG | 0o444
             if stickProperty in writeableProperties:
                 st.st_mode = st.st_mode | 0o222
+            st.st_size = len(self.getPropertyAsBytes(stickCode, stickProperty))
             st.st_nlink = 2
             return st
 
@@ -100,7 +101,13 @@ class DuofernFs(fuse.Fuse):
                     yield fuse.Direntry(stickProperty)
 
     def open(self, path, flags):
-        if path != hello_path:
+        pathElements = path[1:].split('/')
+
+        if len(pathElements) != 2:
+            return -errno.ENOENT
+
+        [stickCode, stickProperty] = pathElements
+        if not self.stickHasProperty(stickCode, stickProperty):
             return -errno.ENOENT
 
         accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
@@ -108,14 +115,22 @@ class DuofernFs(fuse.Fuse):
             return -errno.EACCES
 
     def read(self, path, size, offset):
-        if path != hello_path:
+        pathElements = path[1:].split('/')
+
+        if len(pathElements) != 2:
             return -errno.ENOENT
 
-        slen = len(hello_str)
+        [stickCode, stickProperty] = pathElements
+        if not self.stickHasProperty(stickCode, stickProperty):
+            return -errno.ENOENT
+
+        value = self.getPropertyAsBytes(stickCode, stickProperty)
+
+        slen = len(value)
         if offset < slen:
             if offset + size > slen:
                 size = slen - offset
-            buf = hello_str[offset:offset+size]
+            buf = value[offset:offset+size]
         else:
             buf = b''
         return buf
@@ -126,6 +141,9 @@ class DuofernFs(fuse.Fuse):
     def stickHasProperty(self, stickCode, stickProperty):
         return self.stickExists(stickCode) \
             and stickProperty in self._sticks[stickCode]
+
+    def getPropertyAsBytes(self, stickCode, stickProperty):
+        return bytes(str(self._sticks[stickCode][stickProperty]), 'utf-8')
 
     @property
     def _sticks(self):
