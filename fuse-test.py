@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 
-#    Copyright (C) 2006  Andrew Straw  <strawman@astraw.com>
-#
-#    This program can be distributed under the terms of the GNU LGPL.
-#    See the file COPYING.
-#
+from pyduofern.duofern_stick import DuofernStickThreaded
 
 import os, stat, errno
 # pull in some spaghetti to make this stuff work without fuse-py being installed
@@ -13,7 +9,6 @@ try:
 except ImportError:
     pass
 import fuse
-from fuse import Fuse
 
 
 if not hasattr(fuse, '__version__'):
@@ -37,28 +32,66 @@ class MyStat(fuse.Stat):
         self.st_mtime = 0
         self.st_ctime = 0
 
-class HelloFS(Fuse):
+class DuofernFs(fuse.Fuse):
+    def __init__(self, duofernstick, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.duofernstick = duofernstick
 
     def getattr(self, path):
         st = MyStat()
-        if path == '/':
-            st.st_mode = stat.S_IFDIR | 0o755
-            st.st_nlink = 2
-        elif path == hello_path:
-            st.st_mode = stat.S_IFREG | 0o444
-            st.st_nlink = 1
-            st.st_size = len(hello_str)
-        else:
+
+        pathElements = path[1:].split('/')
+
+        if len(pathElements) == 1:
+            [stickCode] = pathElements
+
+            if stickCode == '' or stickCode in self._sticks:
+                st.st_mode = stat.S_IFDIR | 0o755
+                st.st_nlink = 2
+                return st
+
             return -errno.ENOENT
+
+        if len(pathElements) == 2:
+            [stickCode, stickProperty] = pathElements
+
+            if stickCode not in self._sticks:
+                return -errno.ENOENT
+
+            if stickProperty in self._sticks[stickCode]:
+                st.st_mode = stat.S_IFREG | 0o444
+                st.st_nlink = 2
+                return st
+
+            return -errno.ENOENT
+
+        st.st_mode = stat.S_IFDIR | 0o000
+        st.st_nlink = 2
         return st
+        return -errno.EIO
+
 
     def readdir(self, path, offset):
-        for r in  '.', '..', hello_path[1:]:
-            yield fuse.Direntry(r)
+        yield fuse.Direntry('.')
+        yield fuse.Direntry('..')
+
+        pathElements = path[1:].split('/')
+
+        if len(pathElements) == 1:
+            [stickCode] = pathElements
+
+            if stickCode == '':
+                for stickCode in self._sticks.keys():
+                    yield fuse.Direntry(stickCode)
+
+            elif stickCode in self._sticks:
+                for stickProperty in self._sticks[stickCode].keys():
+                    yield fuse.Direntry(stickProperty)
 
     def open(self, path, flags):
         if path != hello_path:
             return -errno.ENOENT
+
         accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
         if (flags & accmode) != os.O_RDONLY:
             return -errno.EACCES
@@ -66,6 +99,7 @@ class HelloFS(Fuse):
     def read(self, path, size, offset):
         if path != hello_path:
             return -errno.ENOENT
+
         slen = len(hello_str)
         if offset < slen:
             if offset + size > slen:
@@ -75,14 +109,28 @@ class HelloFS(Fuse):
             buf = b''
         return buf
 
+    @property
+    def _sticks(self):
+        return self.duofernstick.duofern_parser.modules['by_code']
+
+
 def main():
     usage="""
 Userspace hello example
 
-""" + Fuse.fusage
-    server = HelloFS(version="%prog " + fuse.__version__,
-                     usage=usage,
-                     dash_s_do='setsingle')
+""" + fuse.Fuse.fusage
+
+    
+    stick = DuofernStickThreaded(serial_port="/dev/duofernstick", config_file_json="./pyduofern-config.json")
+    stick._initialize()
+    stick.start()
+
+    server = DuofernFs(
+        stick, 
+        version="%prog " + fuse.__version__,
+        usage=usage,
+        dash_s_do='setsingle'
+    )
 
     server.parse(errex=1)
     server.main()
