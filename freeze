@@ -1,0 +1,3 @@
+pyduofern==0.34.1
+pyserial==3.4
+pyserial-asyncio==0.4
