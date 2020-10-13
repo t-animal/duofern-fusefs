@@ -45,7 +45,7 @@ class DuofernFs(fuse.Fuse):
         if len(pathElements) == 1:
             [stickCode] = pathElements
 
-            if stickCode == '' or stickCode in self._sticks:
+            if path == '/' or self.stickExists(stickCode):
                 st.st_mode = stat.S_IFDIR | 0o755
                 st.st_nlink = 2
                 return st
@@ -67,21 +67,18 @@ class DuofernFs(fuse.Fuse):
             ]
             [stickCode, stickProperty] = pathElements
 
-            if stickCode not in self._sticks:
+            if not self.stickExists(stickCode):
                 return -errno.ENOENT
 
-            if stickProperty in self._sticks[stickCode]:
-                st.st_mode = stat.S_IFREG | 0o444
-                if stickProperty in writeableProperties:
-                    st.st_mode = st.st_mode | 0o222
-                st.st_nlink = 2
-                return st
+            if not self.stickHasProperty(stickCode, stickProperty):
+                return -errno.ENOENT
 
-            return -errno.ENOENT
+            st.st_mode = stat.S_IFREG | 0o444
+            if stickProperty in writeableProperties:
+                st.st_mode = st.st_mode | 0o222
+            st.st_nlink = 2
+            return st
 
-        st.st_mode = stat.S_IFDIR | 0o000
-        st.st_nlink = 2
-        return st
         return -errno.EIO
 
 
@@ -122,6 +119,13 @@ class DuofernFs(fuse.Fuse):
         else:
             buf = b''
         return buf
+
+    def stickExists(self, stickCode):
+        return stickCode in self._sticks
+
+    def stickHasProperty(self, stickCode, stickProperty):
+        return self.stickExists(stickCode) \
+            and stickProperty in self._sticks[stickCode]
 
     @property
     def _sticks(self):
