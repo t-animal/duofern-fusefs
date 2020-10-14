@@ -50,11 +50,46 @@ class DuofernFsPath:
     def deviceProperty(self):
         return self.pathElements[1]
 
+class DuofernFsStickWrapper:
+
+    writeableProperties = [
+        "sunMode",
+        "position",
+        "sunPosition",
+        "ventilatingPosition",
+        "dawnAutomatic",
+        "duskAutomatic",
+        "manualMode",
+        "sunAutomatic",
+        "timeAutomatic",
+        "ventilatingMode"
+    ]
+
+    def __init__(self, duofernstick):
+        self.duofernstick = duofernstick
+
+    def deviceExists(self, deviceCode):
+        return deviceCode in self.devices
+
+    def deviceHasProperty(self, deviceCode, deviceProperty):
+        return self.deviceExists(deviceCode) \
+            and deviceProperty in self.devices[deviceCode]
+
+    def getPropertyAsBytes(self, deviceCode, deviceProperty):
+        return bytes(str(self.devices[deviceCode][deviceProperty]), 'utf-8')
+
+    @property
+    def devices(self):
+        return self.duofernstick.duofern_parser.modules['by_code']
+
+    @staticmethod
+    def isWritable(property):
+        return property in DuofernFsStickWrapper.writeableProperties
 
 class DuofernFs(fuse.Fuse):
     def __init__(self, duofernstick, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.duofernstick = duofernstick
+        self.stick = duofernstick
 
     def getattr(self, path):
         st = MyStat()
@@ -62,7 +97,7 @@ class DuofernFs(fuse.Fuse):
         fsPath = DuofernFsPath(path)
 
         if fsPath.depth == 1:
-            if fsPath.isRoot or self.deviceExists(fsPath.deviceCode):
+            if fsPath.isRoot or self.stick.deviceExists(fsPath.deviceCode):
                 st.st_mode = stat.S_IFDIR | 0o755
                 st.st_nlink = 2
                 return st
@@ -70,29 +105,16 @@ class DuofernFs(fuse.Fuse):
             return -errno.ENOENT
 
         if fsPath.depth == 2:
-            writeableProperties = [
-                "sunMode",
-                "position",
-                "sunPosition",
-                "ventilatingPosition",
-                "dawnAutomatic",
-                "duskAutomatic",
-                "manualMode",
-                "sunAutomatic",
-                "timeAutomatic",
-                "ventilatingMode"
-            ]
-
-            if not self.deviceExists(fsPath.deviceCode):
+            if not self.stick.deviceExists(fsPath.deviceCode):
                 return -errno.ENOENT
 
-            if not self.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
+            if not self.stick.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
                 return -errno.ENOENT
 
             st.st_mode = stat.S_IFREG | 0o444
-            if fsPath.deviceProperty in writeableProperties:
+            if DuofernFsStickWrapper.isWritable(fsPath.deviceProperty):
                 st.st_mode = st.st_mode | 0o222
-            st.st_size = len(self.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty))
+            st.st_size = len(self.stick.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty))
             st.st_nlink = 2
             return st
 
@@ -109,12 +131,12 @@ class DuofernFs(fuse.Fuse):
             return
 
         if fsPath.isRoot:
-            for deviceCode in self._devices.keys():
+            for deviceCode in self.stick.devices.keys():
                 yield fuse.Direntry(deviceCode)
             return
 
-        if fsPath.deviceCode in self._devices:
-            for deviceProperty in self._devices[fsPath.deviceCode].keys():
+        if fsPath.deviceCode in self.stick.devices:
+            for deviceProperty in self.stick.devices[fsPath.deviceCode].keys():
                 yield fuse.Direntry(deviceProperty)
 
     def open(self, path, flags):
@@ -123,7 +145,7 @@ class DuofernFs(fuse.Fuse):
         if fsPath.depth != 2:
             return -errno.ENOENT
 
-        if not self.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
+        if not self.stick.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
             return -errno.ENOENT
 
         accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
@@ -136,24 +158,10 @@ class DuofernFs(fuse.Fuse):
         if fsPath.depth != 2:
             return -errno.ENOENT
 
-        if not self.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
+        if not self.stick.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
             return -errno.ENOENT
 
-        return self.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty)
-
-    def deviceExists(self, deviceCode):
-        return deviceCode in self._devices
-
-    def deviceHasProperty(self, deviceCode, deviceProperty):
-        return self.deviceExists(deviceCode) \
-            and deviceProperty in self._devices[deviceCode]
-
-    def getPropertyAsBytes(self, deviceCode, deviceProperty):
-        return bytes(str(self._devices[deviceCode][deviceProperty]), 'utf-8')
-
-    @property
-    def _devices(self):
-        return self.duofernstick.duofern_parser.modules['by_code']
+        return self.stick.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty)
 
 
 def main():
@@ -168,7 +176,7 @@ Userspace hello example
     stick.start()
 
     server = DuofernFs(
-        stick, 
+        DuofernFsStickWrapper(stick), 
         version="%prog " + fuse.__version__,
         usage=usage,
         dash_s_do='setsingle'
