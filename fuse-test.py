@@ -32,6 +32,28 @@ class MyStat(fuse.Stat):
         self.st_mtime = 0
         self.st_ctime = 0
 
+class DuofernFsPath:
+    def __init__(self, path):
+        self.path = path
+        self.pathElements = path[1:].split('/')
+
+    @property
+    def isRoot(self):
+        return self.path == '/'
+
+    @property
+    def depth(self):
+        return len(self.pathElements)
+
+    @property
+    def deviceCode(self):
+        return self.pathElements[0]
+
+    @property
+    def deviceProperty(self):
+        return self.pathElements[1]
+
+
 class DuofernFs(fuse.Fuse):
     def __init__(self, duofernstick, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -40,19 +62,17 @@ class DuofernFs(fuse.Fuse):
     def getattr(self, path):
         st = MyStat()
 
-        pathElements = path[1:].split('/')
+        fsPath = DuofernFsPath(path)
 
-        if len(pathElements) == 1:
-            [stickCode] = pathElements
-
-            if path == '/' or self.deviceExists(deviceCode):
+        if fsPath.depth == 1:
+            if fsPath.isRoot or self.deviceExists(fsPath.deviceCode):
                 st.st_mode = stat.S_IFDIR | 0o755
                 st.st_nlink = 2
                 return st
 
             return -errno.ENOENT
 
-        if len(pathElements) == 2:
+        if fsPath.depth == 2:
             writeableProperties = [
                 "sunMode",
                 "position",
@@ -65,18 +85,17 @@ class DuofernFs(fuse.Fuse):
                 "timeAutomatic",
                 "ventilatingMode"
             ]
-            [deviceCode, deviceProperty] = pathElements
 
-            if not self.deviceExists(deviceCode):
+            if not self.deviceExists(fsPath.deviceCode):
                 return -errno.ENOENT
 
-            if not self.deviceHasProperty(deviceCode, deviceProperty):
+            if not self.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
                 return -errno.ENOENT
 
             st.st_mode = stat.S_IFREG | 0o444
-            if deviceProperty in writeableProperties:
+            if fsPath.deviceProperty in writeableProperties:
                 st.st_mode = st.st_mode | 0o222
-            st.st_size = len(self.getPropertyAsBytes(deviceCode, deviceProperty))
+            st.st_size = len(self.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty))
             st.st_nlink = 2
             return st
 
@@ -87,27 +106,27 @@ class DuofernFs(fuse.Fuse):
         yield fuse.Direntry('.')
         yield fuse.Direntry('..')
 
-        pathElements = path[1:].split('/')
+        fsPath = DuofernFsPath(path)
 
-        if len(pathElements) == 1:
-            [deviceCode] = pathElements
+        if not fsPath.depth == 1:
+            return
 
-            if deviceCode == '':
-                for deviceCode in self._devices.keys():
-                    yield fuse.Direntry(deviceCode)
+        if fsPath.isRoot:
+            for deviceCode in self._devices.keys():
+                yield fuse.Direntry(deviceCode)
+            return
 
-            elif deviceCode in self._devices:
-                for deviceProperty in self._devices[deviceCode].keys():
-                    yield fuse.Direntry(deviceProperty)
+        if fsPath.deviceCode in self._devices:
+            for deviceProperty in self._devices[fsPath.deviceCode].keys():
+                yield fuse.Direntry(deviceProperty)
 
     def open(self, path, flags):
-        pathElements = path[1:].split('/')
+        fsPath = DuofernFsPath(path)
 
-        if len(pathElements) != 2:
+        if fsPath.depth != 2:
             return -errno.ENOENT
 
-        [deviceCode, deviceProperty] = pathElements
-        if not self.deviceHasProperty(deviceCode, deviceProperty):
+        if not self.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
             return -errno.ENOENT
 
         accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
@@ -115,16 +134,15 @@ class DuofernFs(fuse.Fuse):
             return -errno.EACCES
 
     def read(self, path, size, offset):
-        pathElements = path[1:].split('/')
+        fsPath = DuofernFsPath(path)
 
-        if len(pathElements) != 2:
+        if fsPath.depth != 2:
             return -errno.ENOENT
 
-        [deviceCode, deviceProperty] = pathElements
-        if not self.deviceHasProperty(deviceCode, deviceProperty):
+        if not self.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
             return -errno.ENOENT
 
-        value = self.getPropertyAsBytes(deviceCode, deviceProperty)
+        value = self.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty)
 
         slen = len(value)
         if offset < slen:
