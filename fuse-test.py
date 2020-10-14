@@ -45,7 +45,7 @@ class DuofernFs(fuse.Fuse):
         if len(pathElements) == 1:
             [stickCode] = pathElements
 
-            if path == '/' or self.stickExists(stickCode):
+            if path == '/' or self.deviceExists(deviceCode):
                 st.st_mode = stat.S_IFDIR | 0o755
                 st.st_nlink = 2
                 return st
@@ -65,18 +65,18 @@ class DuofernFs(fuse.Fuse):
                 "timeAutomatic",
                 "ventilatingMode"
             ]
-            [stickCode, stickProperty] = pathElements
+            [deviceCode, deviceProperty] = pathElements
 
-            if not self.stickExists(stickCode):
+            if not self.deviceExists(deviceCode):
                 return -errno.ENOENT
 
-            if not self.stickHasProperty(stickCode, stickProperty):
+            if not self.deviceHasProperty(deviceCode, deviceProperty):
                 return -errno.ENOENT
 
             st.st_mode = stat.S_IFREG | 0o444
-            if stickProperty in writeableProperties:
+            if deviceProperty in writeableProperties:
                 st.st_mode = st.st_mode | 0o222
-            st.st_size = len(self.getPropertyAsBytes(stickCode, stickProperty))
+            st.st_size = len(self.getPropertyAsBytes(deviceCode, deviceProperty))
             st.st_nlink = 2
             return st
 
@@ -90,15 +90,15 @@ class DuofernFs(fuse.Fuse):
         pathElements = path[1:].split('/')
 
         if len(pathElements) == 1:
-            [stickCode] = pathElements
+            [deviceCode] = pathElements
 
-            if stickCode == '':
-                for stickCode in self._sticks.keys():
-                    yield fuse.Direntry(stickCode)
+            if deviceCode == '':
+                for deviceCode in self._devices.keys():
+                    yield fuse.Direntry(deviceCode)
 
-            elif stickCode in self._sticks:
-                for stickProperty in self._sticks[stickCode].keys():
-                    yield fuse.Direntry(stickProperty)
+            elif deviceCode in self._devices:
+                for deviceProperty in self._devices[deviceCode].keys():
+                    yield fuse.Direntry(deviceProperty)
 
     def open(self, path, flags):
         pathElements = path[1:].split('/')
@@ -106,8 +106,8 @@ class DuofernFs(fuse.Fuse):
         if len(pathElements) != 2:
             return -errno.ENOENT
 
-        [stickCode, stickProperty] = pathElements
-        if not self.stickHasProperty(stickCode, stickProperty):
+        [deviceCode, deviceProperty] = pathElements
+        if not self.deviceHasProperty(deviceCode, deviceProperty):
             return -errno.ENOENT
 
         accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
@@ -120,11 +120,11 @@ class DuofernFs(fuse.Fuse):
         if len(pathElements) != 2:
             return -errno.ENOENT
 
-        [stickCode, stickProperty] = pathElements
-        if not self.stickHasProperty(stickCode, stickProperty):
+        [deviceCode, deviceProperty] = pathElements
+        if not self.deviceHasProperty(deviceCode, deviceProperty):
             return -errno.ENOENT
 
-        value = self.getPropertyAsBytes(stickCode, stickProperty)
+        value = self.getPropertyAsBytes(deviceCode, deviceProperty)
 
         slen = len(value)
         if offset < slen:
@@ -135,18 +135,18 @@ class DuofernFs(fuse.Fuse):
             buf = b''
         return buf
 
-    def stickExists(self, stickCode):
-        return stickCode in self._sticks
+    def deviceExists(self, deviceCode):
+        return deviceCode in self._devices
 
-    def stickHasProperty(self, stickCode, stickProperty):
-        return self.stickExists(stickCode) \
-            and stickProperty in self._sticks[stickCode]
+    def deviceHasProperty(self, deviceCode, deviceProperty):
+        return self.deviceExists(deviceCode) \
+            and deviceProperty in self._devices[deviceCode]
 
-    def getPropertyAsBytes(self, stickCode, stickProperty):
-        return bytes(str(self._sticks[stickCode][stickProperty]), 'utf-8')
+    def getPropertyAsBytes(self, deviceCode, deviceProperty):
+        return bytes(str(self._devices[deviceCode][deviceProperty]), 'utf-8')
 
     @property
-    def _sticks(self):
+    def _devices(self):
         return self.duofernstick.duofern_parser.modules['by_code']
 
 
