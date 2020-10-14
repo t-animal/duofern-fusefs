@@ -16,9 +16,6 @@ if not hasattr(fuse, '__version__'):
 
 fuse.fuse_python_api = (0, 2)
 
-hello_path = '/hello'
-hello_str = b'Hello World!\n'
-
 class MyStat(fuse.Stat):
     def __init__(self):
         self.st_mode = 0
