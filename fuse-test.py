@@ -142,16 +142,7 @@ class DuofernFs(fuse.Fuse):
         if not self.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
             return -errno.ENOENT
 
-        value = self.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty)
-
-        slen = len(value)
-        if offset < slen:
-            if offset + size > slen:
-                size = slen - offset
-            buf = value[offset:offset+size]
-        else:
-            buf = b''
-        return buf
+        return self.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty)
 
     def deviceExists(self, deviceCode):
         return deviceCode in self._devices
