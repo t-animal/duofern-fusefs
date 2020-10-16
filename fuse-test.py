@@ -50,20 +50,32 @@ class DuofernFsPath:
     def deviceProperty(self):
         return self.pathElements[1]
 
-class DuofernFsStickWrapper:
+def toPercentage(stringInput):
+    numberValue = int(stringInput)
+    if not 0 <= numberValue <= 100:
+        raise ValueError()
+    return numberValue
 
-    writeableProperties = [
-        "sunMode",
-        "position",
-        "sunPosition",
-        "ventilatingPosition",
-        "dawnAutomatic",
-        "duskAutomatic",
-        "manualMode",
-        "sunAutomatic",
-        "timeAutomatic",
-        "ventilatingMode"
-    ]
+def toOnOffString(stringInput):
+    if not stringInput in ['on', 'off']:
+        raise ValueError()
+    return stringInput
+
+
+class ShutterStickWrapper:
+
+    writeablePropertyValidators = {
+        'sunMode':              toOnOffString,
+        'position':             toPercentage,
+        'sunPosition':          toPercentage,
+        'ventilatingPosition':  toPercentage,
+        'dawnAutomatic':        toOnOffString,
+        'duskAutomatic':        toOnOffString,
+        'manualMode':           toOnOffString,
+        'sunAutomatic':         toOnOffString,
+        'timeAutomatic':        toOnOffString,
+        'ventilatingMode':      toOnOffString,
+    }
 
     def __init__(self, duofernstick):
         self.duofernstick = duofernstick
@@ -84,7 +96,14 @@ class DuofernFsStickWrapper:
 
     @staticmethod
     def isWritable(property):
-        return property in DuofernFsStickWrapper.writeableProperties
+        return property in ShutterStickWrapper.writeablePropertyValidators
+
+    @staticmethod
+    def sanitizeInput(property, value):
+        if not ShutterStickWrapper.isWritable(property):
+            raise ValueError()
+        return ShutterStickWrapper.writeablePropertyValidators[property](value)
+
 
 class DuofernFs(fuse.Fuse):
     def __init__(self, duofernstick, *args, **kwargs):
@@ -112,7 +131,7 @@ class DuofernFs(fuse.Fuse):
                 return -errno.ENOENT
 
             st.st_mode = stat.S_IFREG | 0o444
-            if DuofernFsStickWrapper.isWritable(fsPath.deviceProperty):
+            if ShutterStickWrapper.isWritable(fsPath.deviceProperty):
                 st.st_mode = st.st_mode | 0o222
             st.st_size = len(self.stick.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty))
             st.st_nlink = 2
@@ -148,9 +167,32 @@ class DuofernFs(fuse.Fuse):
         if not self.stick.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
             return -errno.ENOENT
 
-        accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
-        if (flags & accmode) != os.O_RDONLY:
+        if not ShutterStickWrapper.isWritable(fsPath.deviceProperty):
+            readWriteMask = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
+            if (flags & readWriteMask) != os.O_RDONLY:
+                return -errno.EACCES
+
+    def write(self, path, buf, offset):
+        fsPath = DuofernFsPath(path)
+
+        if fsPath.depth != 2:
+            return -errno.ENOENT
+
+        if not self.stick.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
+            return -errno.ENOENT
+
+        if not ShutterStickWrapper.isWritable(fsPath.deviceProperty):
             return -errno.EACCES
+
+        try:
+            value = ShutterStickWrapper.sanitizeInput(fsPath.deviceProperty, buf.decode())
+        except:
+            return -errno.EINVAL
+
+        self.stick.duofernstick.command(fsPath.deviceCode, fsPath.deviceProperty, value)
+
+        return len(buf)
+
 
     def read(self, path, size, offset):
         fsPath = DuofernFsPath(path)
@@ -176,7 +218,7 @@ Userspace hello example
     stick.start()
 
     server = DuofernFs(
-        DuofernFsStickWrapper(stick), 
+        ShutterStickWrapper(stick), 
         version="%prog " + fuse.__version__,
         usage=usage,
         dash_s_do='setsingle'
