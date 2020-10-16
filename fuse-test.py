@@ -77,15 +77,24 @@ class ShutterStickWrapper:
         'ventilatingMode':      toOnOffString,
     }
 
+    noArgCommands = [
+        'up',
+        'down',
+        'stop',
+        'toggle',
+    ]
+
     def __init__(self, duofernstick):
         self.duofernstick = duofernstick
+
 
     def deviceExists(self, deviceCode):
         return deviceCode in self.devices
 
     def deviceHasProperty(self, deviceCode, deviceProperty):
         return self.deviceExists(deviceCode) \
-            and deviceProperty in self.devices[deviceCode]
+            and ( deviceProperty in self.devices[deviceCode] \
+                    or deviceProperty in ShutterStickWrapper.noArgCommands )
 
     def getPropertyAsBytes(self, deviceCode, deviceProperty):
         return bytes(str(self.devices[deviceCode][deviceProperty]), 'utf-8')
@@ -96,7 +105,12 @@ class ShutterStickWrapper:
 
     @staticmethod
     def isWritable(property):
-        return property in ShutterStickWrapper.writeablePropertyValidators
+        return property in ShutterStickWrapper.writeablePropertyValidators \
+            or property in ShutterStickWrapper.noArgCommands
+
+    @staticmethod
+    def isReadable(property):
+        return property not in ShutterStickWrapper.noArgCommands
 
     @staticmethod
     def sanitizeInput(property, value):
@@ -130,10 +144,12 @@ class DuofernFs(fuse.Fuse):
             if not self.stick.deviceHasProperty(fsPath.deviceCode, fsPath.deviceProperty):
                 return -errno.ENOENT
 
-            st.st_mode = stat.S_IFREG | 0o444
+            st.st_mode = stat.S_IFREG 
+            if ShutterStickWrapper.isReadable(fsPath.deviceProperty):
+                st.st_size = len(self.stick.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty))
+                st.st_mode = st.st_mode | 0o444
             if ShutterStickWrapper.isWritable(fsPath.deviceProperty):
                 st.st_mode = st.st_mode | 0o222
-            st.st_size = len(self.stick.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty))
             st.st_nlink = 2
             return st
 
@@ -157,6 +173,9 @@ class DuofernFs(fuse.Fuse):
         if fsPath.deviceCode in self.stick.devices:
             for deviceProperty in self.stick.devices[fsPath.deviceCode].keys():
                 yield fuse.Direntry(deviceProperty)
+
+            for deviceCommand in ShutterStickWrapper.noArgCommands:
+                yield fuse.Direntry(deviceCommand)
 
     def open(self, path, flags):
         fsPath = DuofernFsPath(path)
@@ -183,6 +202,10 @@ class DuofernFs(fuse.Fuse):
 
         if not ShutterStickWrapper.isWritable(fsPath.deviceProperty):
             return -errno.EACCES
+
+        if fsPath.deviceProperty in ShutterStickWrapper.noArgCommands:
+            self.stick.duofernstick.command(fsPath.deviceCode, fsPath.deviceProperty)
+            return len(buf)
 
         try:
             value = ShutterStickWrapper.sanitizeInput(fsPath.deviceProperty, buf.decode())
