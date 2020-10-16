@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-
-from pyduofern.duofern_stick import DuofernStickThreaded
-
 import os, stat, errno
 # pull in some spaghetti to make this stuff work without fuse-py being installed
 try:
@@ -10,11 +6,14 @@ except ImportError:
     pass
 import fuse
 
+from .duofernstick_wrapper import ShutterStickWrapper
+
 
 if not hasattr(fuse, '__version__'):
     raise RuntimeError("your fuse-py doesn't know of fuse.__version__, probably it's too old.")
 
 fuse.fuse_python_api = (0, 2)
+
 
 class MyStat(fuse.Stat):
     def __init__(self):
@@ -49,74 +48,6 @@ class DuofernFsPath:
     @property
     def deviceProperty(self):
         return self.pathElements[1]
-
-def toPercentage(stringInput):
-    numberValue = int(stringInput)
-    if not 0 <= numberValue <= 100:
-        raise ValueError()
-    return numberValue
-
-def toOnOffString(stringInput):
-    if not stringInput in ['on', 'off']:
-        raise ValueError()
-    return stringInput
-
-
-class ShutterStickWrapper:
-
-    writeablePropertyValidators = {
-        'sunMode':              toOnOffString,
-        'position':             toPercentage,
-        'sunPosition':          toPercentage,
-        'ventilatingPosition':  toPercentage,
-        'dawnAutomatic':        toOnOffString,
-        'duskAutomatic':        toOnOffString,
-        'manualMode':           toOnOffString,
-        'sunAutomatic':         toOnOffString,
-        'timeAutomatic':        toOnOffString,
-        'ventilatingMode':      toOnOffString,
-    }
-
-    noArgCommands = [
-        'up',
-        'down',
-        'stop',
-        'toggle',
-    ]
-
-    def __init__(self, duofernstick):
-        self.duofernstick = duofernstick
-
-
-    def deviceExists(self, deviceCode):
-        return deviceCode in self.devices
-
-    def deviceHasProperty(self, deviceCode, deviceProperty):
-        return self.deviceExists(deviceCode) \
-            and ( deviceProperty in self.devices[deviceCode] \
-                    or deviceProperty in ShutterStickWrapper.noArgCommands )
-
-    def getPropertyAsBytes(self, deviceCode, deviceProperty):
-        return bytes(str(self.devices[deviceCode][deviceProperty]), 'utf-8')
-
-    @property
-    def devices(self):
-        return self.duofernstick.duofern_parser.modules['by_code']
-
-    @staticmethod
-    def isWritable(property):
-        return property in ShutterStickWrapper.writeablePropertyValidators \
-            or property in ShutterStickWrapper.noArgCommands
-
-    @staticmethod
-    def isReadable(property):
-        return property not in ShutterStickWrapper.noArgCommands
-
-    @staticmethod
-    def sanitizeInput(property, value):
-        if not ShutterStickWrapper.isWritable(property):
-            raise ValueError()
-        return ShutterStickWrapper.writeablePropertyValidators[property](value)
 
 
 class DuofernFs(fuse.Fuse):
@@ -227,28 +158,3 @@ class DuofernFs(fuse.Fuse):
             return -errno.ENOENT
 
         return self.stick.getPropertyAsBytes(fsPath.deviceCode, fsPath.deviceProperty)
-
-
-def main():
-    usage="""
-Userspace hello example
-
-""" + fuse.Fuse.fusage
-
-    
-    stick = DuofernStickThreaded(serial_port="/dev/duofernstick", config_file_json="./pyduofern-config.json")
-    stick._initialize()
-    stick.start()
-
-    server = DuofernFs(
-        ShutterStickWrapper(stick), 
-        version="%prog " + fuse.__version__,
-        usage=usage,
-        dash_s_do='setsingle'
-    )
-
-    server.parse(errex=1)
-    server.main()
-
-if __name__ == '__main__':
-    main()
